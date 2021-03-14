@@ -13,6 +13,7 @@
 
 namespace sdl
 {
+  static SDL_Color const black{0x00, 0x00, 0x00};
   static SDL_Color const dark_green{0x00, 0x20, 0x00};
   static SDL_Color const dark_grey{0x20, 0x20, 0x20};
   static SDL_Color const grey{0x80, 0x80, 0x80};
@@ -70,6 +71,12 @@ namespace sdl
   {
     return renderer(SDL_CreateRenderer(w.get(), args...),
                     SDL_DestroyRenderer);
+  }
+
+  /** Sets the draw colour for an SDL renderer */
+  inline void render_set_colour(renderer const& r, SDL_Color const& c)
+  {
+    SDL_SetRenderDrawColor(r.get(), c.r, c.g, c.b, SDL_ALPHA_OPAQUE);
   }
 
   /** std::unique_ptr wrapper for SDL_Surface */
