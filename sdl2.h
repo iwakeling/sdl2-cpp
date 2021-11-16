@@ -99,40 +99,6 @@ namespace sdl
   {
     SDL_RenderCopy(r.get(), t.get(), args...);
   }
-
-  /** Returns true if the event e is a debounced key event.
-
-      Debouncing occurs in the specified context, usually zero. If multiple
-      debounce contexts are needed, they can be distinguised using ctx, which
-      is an application specific ID.
-  */
-  template<int ctx=0>
-  bool is_debounced_key(SDL_Event const& e)
-  {
-    static unsigned int last_key_timestamp = 0;
-    static unsigned int key_repeat_count = 0;
-    auto key_repeat_timeout = []()
-                              {
-                                return key_repeat_count > 0 ? 25 : 500;
-                              };
-
-    if( e.type == SDL_KEYDOWN &&
-        (e.key.repeat == 0 ||
-         e.key.timestamp - last_key_timestamp > key_repeat_timeout()) )
-    {
-      if( e.key.repeat == 0 )
-      {
-        key_repeat_count = 0;
-      }
-      else
-      {
-        key_repeat_count++;
-      }
-      last_key_timestamp = e.key.timestamp;
-      return true;
-    }
-    return false;
-  }
 }
 
 #endif // SDL2_CPP_SDL2_H
