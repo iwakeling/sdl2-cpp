@@ -13,11 +13,11 @@
 
 namespace sdl
 {
-  static SDL_Color const black{0x00, 0x00, 0x00};
-  static SDL_Color const dark_green{0x00, 0x20, 0x00};
-  static SDL_Color const dark_grey{0x20, 0x20, 0x20};
-  static SDL_Color const grey{0x80, 0x80, 0x80};
-  static SDL_Color const white{0xFF, 0xFF, 0xFF};
+  static SDL_Color const black{0x00, 0x00, 0x00, SDL_ALPHA_OPAQUE};
+  static SDL_Color const dark_green{0x00, 0x20, 0x00, SDL_ALPHA_OPAQUE};
+  static SDL_Color const dark_grey{0x20, 0x20, 0x20, SDL_ALPHA_OPAQUE};
+  static SDL_Color const grey{0x80, 0x80, 0x80, SDL_ALPHA_OPAQUE};
+  static SDL_Color const white{0xFF, 0xFF, 0xFF, SDL_ALPHA_OPAQUE};
 
   /** Throws a std::runtime_error with a string combining a prefix and
       the most recent SDL error
@@ -76,7 +76,7 @@ namespace sdl
   /** Sets the draw colour for an SDL renderer */
   inline void render_set_colour(renderer const& r, SDL_Color const& c)
   {
-    SDL_SetRenderDrawColor(r.get(), c.r, c.g, c.b, SDL_ALPHA_OPAQUE);
+    SDL_SetRenderDrawColor(r.get(), c.r, c.g, c.b, c.a);
   }
 
   /** std::unique_ptr wrapper for SDL_Surface */
@@ -99,6 +99,41 @@ namespace sdl
   {
     SDL_RenderCopy(r.get(), t.get(), args...);
   }
+
+  /** Sets a style on a renderer and removes it on destruction */
+  class style
+  {
+  public:
+    style(renderer const& r)
+      : r_(r)
+      , attrs_(0)
+    {}
+
+    ~style()
+    {
+      if( attrs_ & colour )
+      {
+        SDL_SetRenderDrawColor(r_.get(), c_.r, c_.g, c_.b, c_.a);
+      }
+    }
+
+    style& set_colour(SDL_Color c)
+    {
+      attrs_ |= colour;
+      SDL_GetRenderDrawColor(r_.get(), &c_.r, &c_.g, &c_.b, &c_.a);
+      SDL_SetRenderDrawColor(r_.get(), c.r, c.g, c.b, c.a);
+      return *this;
+    }
+
+  private:
+    enum Attrs
+    {
+      colour = 1 >> 1
+    };
+    renderer const& r_;
+    int attrs_;
+    SDL_Color c_;
+  };
 }
 
 #endif // SDL2_CPP_SDL2_H
