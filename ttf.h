@@ -8,10 +8,9 @@
 
 #include "sdl2.h"
 
+#include <fontconfig/fontconfig.h>
 #include <SDL2/SDL_ttf.h>
 #include <stdexcept>
-
-#include <iostream>
 
 namespace sdl
 {
@@ -78,6 +77,29 @@ namespace sdl
     {
       return surface(TTF_RenderUTF8_Blended(f.get(), text.c_str(), args...),
                      SDL_FreeSurface);
+    }
+
+    std::string GetFontFile(std::string const& fontName)
+    {
+      std::string fontFile;
+      auto config = FcInitLoadConfigAndFonts();
+      auto pat = FcNameParse(reinterpret_cast<FcChar8 const*>(fontName.c_str()));
+      FcConfigSubstitute(config, pat, FcMatchPattern);
+      FcDefaultSubstitute(pat);
+
+      auto result = FcResultNoMatch;
+      auto font = FcFontMatch(config, pat, &result);
+      if( result == FcResultMatch && font != nullptr )
+      {
+        FcChar8* fileName = NULL;
+        if( FcPatternGetString(font, FC_FILE, 0, &fileName) == FcResultMatch )
+        {
+          fontFile = reinterpret_cast<char const*>(fileName);
+        }
+        FcPatternDestroy(font);
+      }
+      FcPatternDestroy(pat);
+      return fontFile;
     }
   }
 }
