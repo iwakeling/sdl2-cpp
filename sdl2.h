@@ -14,10 +14,12 @@
 namespace sdl
 {
   static SDL_Color const black{0x00, 0x00, 0x00, SDL_ALPHA_OPAQUE};
-  static SDL_Color const dark_green{0x00, 0x20, 0x00, SDL_ALPHA_OPAQUE};
-  static SDL_Color const dark_grey{0x20, 0x20, 0x20, SDL_ALPHA_OPAQUE};
+  static SDL_Color const dark_green{0x00, 0x80, 0x00, SDL_ALPHA_OPAQUE};
+  static SDL_Color const dark_grey{0x60, 0x60, 0x60, SDL_ALPHA_OPAQUE};
   static SDL_Color const grey{0x80, 0x80, 0x80, SDL_ALPHA_OPAQUE};
   static SDL_Color const white{0xFF, 0xFF, 0xFF, SDL_ALPHA_OPAQUE};
+  static SDL_Color const dark_yellow{0x80, 0x80,  0x40, SDL_ALPHA_OPAQUE};
+  static SDL_Color const dark_red{0xA4, 0x00, 0x00, SDL_ALPHA_OPAQUE};
 
   /** Throws a std::runtime_error with a string combining a prefix and
       the most recent SDL error
