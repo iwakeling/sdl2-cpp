@@ -61,6 +61,21 @@ namespace sdl
     return window(SDL_CreateWindow(args...), SDL_DestroyWindow);
   }
 
+  /** Creates SDL window with standard parameters, owned by the returned
+      unique_ptr */
+  inline window create_desktop_window(char const* title, bool full_screen)
+  {
+    return create_window(
+      title,
+      SDL_WINDOWPOS_UNDEFINED,
+      SDL_WINDOWPOS_UNDEFINED,
+      640,
+      480,
+      SDL_WINDOW_SHOWN | (full_screen ?
+                          SDL_WINDOW_FULLSCREEN_DESKTOP :
+                          SDL_WINDOW_RESIZABLE));
+  };
+
   /** std::unique_ptr wrapper for SDL_Renderer */
   using renderer = std::unique_ptr<SDL_Renderer, decltype(&SDL_DestroyRenderer)>;
 
