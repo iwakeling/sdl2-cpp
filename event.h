@@ -6,9 +6,15 @@
 #ifndef SDL2_CPP_EVENT_H
 #define SDL2_CPP_EVENT_H
 
+#include <algorithm>
+#include <chrono>
 #include <functional>
-#include <SDL2/SDL.h>
+#include <limits>
 #include <vector>
+
+#include <SDL2/SDL.h>
+
+using namespace std::literals;
 
 namespace sdl2
 {
@@ -17,7 +23,15 @@ namespace sdl2
   class event_map
   {
   public:
-    event_map() = default;
+    event_map()
+    {
+      stop_event_type_ = SDL_RegisterEvents(2);
+      if( stop_event_type_ != -1 )
+      {
+        add_timer_event_type_ = stop_event_type_ + 1;
+      }
+    }
+
     ~event_map() = default;
 
     event_map(event_map const&) = delete;
@@ -62,6 +76,120 @@ namespace sdl2
           std::bind(f, args..., std::placeholders::_1)));
     }
 
+    /** Add a timer
+
+        Note: timers only work when run_event_loop() is used.
+
+        calls f(args...) after interval milliseconds
+        if one_time = false f is called every timeout milliseconds, otherwise
+        f is called only once
+
+        returns true if the timer was succesfully added, false otherwise
+    */
+    template<class Function, class... Args>
+    bool add_timer(
+      std::chrono::milliseconds interval,
+      bool one_shot,
+      Function&& f,
+      Args&&... args)
+    {
+      if( add_timer_event_type_ == -1 )
+      {
+        return false;
+      }
+
+      auto when = std::chrono::steady_clock::now() + interval;
+      SDL_Event event;
+      event.type = add_timer_event_type_;
+      event.user.data1 = new timer(
+        std::move(when),
+        std::move(interval),
+        one_shot,
+        std::bind(f, args...));
+      SDL_PushEvent(&event);
+      return true;
+    }
+
+    /** Run an event loop.
+        Returns false if the event loop could not be started, or true on
+        SDL_QUIT or when stop_event_loop is called.
+
+        Calls render_fun(args...) to render after each event.
+    */
+    template<class Function, class... Args>
+    bool run_event_loop(Function&& render_fun, Args&&... args)
+    {
+      // don't start if we couldn't get event types
+      if( stop_event_type_ == -1 )
+      {
+        return false;
+      }
+
+      stop_ = false;
+      while( !stop_ )
+      {
+        auto now = std::chrono::steady_clock::now();
+        int timeout = std::numeric_limits<int>::max();
+        if( timers_.size() > 0 )
+        {
+          auto next_timer = std::min_element(
+            timers_.begin(),
+            timers_.end(),
+            [](timer const& lhs, timer const& rhs)
+            {
+              return lhs.when_ < rhs.when_;
+            });
+          if( next_timer->when_ > now )
+          {
+            timeout = (next_timer->when_ - now) / 1ms;
+          }
+          else
+          {
+            timeout = 0;
+          }
+        }
+
+        SDL_Event e;
+        if( SDL_WaitEventTimeout(&e, timeout) )
+        {
+          if( e.type == SDL_QUIT || e.type == stop_event_type_ )
+          {
+            stop_ = true;
+          }
+          else if( e.type == add_timer_event_type_ )
+          {
+            std::unique_ptr<timer> t(static_cast<timer*>(e.user.data1));
+            timers_.push_back(*t);
+          }
+          else
+          {
+            handle_event(e);
+          }
+        }
+        else
+        {
+          handle_timeout();
+        }
+
+        render_fun(args...);
+      }
+
+      return true;
+    }
+
+    /** Stops the running event loop, if any
+    */
+    void stop_event_loop()
+    {
+      if( stop_event_type_ != -1 )
+      {
+        SDL_Event event;
+        event.type = stop_event_type_;
+        SDL_PushEvent(&event);
+      }
+    }
+
+
     /** Call the handler matching the event, if any.
 
         If multiple matching handlers are present, tries each in turn until the
@@ -83,6 +211,51 @@ namespace sdl2
   private:
     using event_type = unsigned int;
     using handler = std::function<bool(SDL_Event const& e)>;
+    using time_point = std::chrono::time_point<std::chrono::steady_clock>;
+    struct timer
+    {
+      timer(
+        time_point when,
+        std::chrono::milliseconds interval,
+        bool one_shot,
+        std::function<void()> handler)
+        : when_(std::move(when))
+        , interval_(std::move(interval))
+        , one_shot_(one_shot)
+        , handler_(std::move(handler)) {}
+
+      time_point when_;
+      std::chrono::milliseconds interval_;
+      bool one_shot_;
+      std::function<void()> handler_;
+    };
+
+    void handle_timeout()
+    {
+      auto now = std::chrono::steady_clock::now();
+      timers_.erase(
+        std::remove_if(
+          timers_.begin(),
+          timers_.end(),
+          [&now](timer& t)
+          {
+            bool remove = false;
+            if(now >= t.when_)
+            {
+              t.handler_();
+              if( t.one_shot_ )
+              {
+                remove = true;
+              }
+              else
+              {
+                t.when_ = now + t.interval_;
+              }
+            }
+            return remove;
+          }),
+        timers_.end());
+    }
 
     template<class Callable>
     struct key_down_adaptor
@@ -180,6 +353,10 @@ namespace sdl2
 
   private:
     std::vector<std::pair<event_type,handler>> handlers_;
+    std::vector<timer> timers_;
+    event_type stop_event_type_ = -1;
+    event_type add_timer_event_type_ = -1;
+    bool stop_;
   };
 } // namespace sdl2
 
