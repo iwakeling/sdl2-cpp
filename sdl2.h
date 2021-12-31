@@ -34,7 +34,7 @@ namespace sdl
   {
     lib()
     {
-      if( SDL_Init(SDL_INIT_VIDEO) < 0 )
+      if( SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0 )
       {
         throw_error("Failed to initialise SDL: ");
       }
