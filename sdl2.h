@@ -102,6 +102,11 @@ namespace sdl
   /** std::unique_ptr wrapper for SDL_Texture */
   using texture = std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)>;
 
+  inline texture null_texture()
+  {
+    return {nullptr, nullptr};
+  }
+
   /** Creates an SDL texture for the specified renderer, owned by the returned
       unique_ptr */
   inline texture create_texture_from_surface(renderer const& r, surface const& s)
