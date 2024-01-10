@@ -7,6 +7,7 @@
 #define SDL2_CPP_EVENT_H
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <functional>
 #include <limits>
@@ -19,16 +20,31 @@ using namespace std::literals;
 namespace sdl2
 {
   /** Map SDL events to handler functions.
+
+      event_map can be used either with or without an event loop.
+
+      Without an event loop, it is the caller's responsibility to call
+      handle_event() and to ensure thread safety between calls to
+      add_handler() (and the wrapper functions) and
+      handle_event(). In this mode, timers are not available.
+
+      With an event loop, all calls to add_handler() (and the wrapper
+      functions) must be completed before calling
+      run_event_loop(). Calls to stop_event_loop(), add_timer() and
+      remove_timer() are thread safe and may be called at any time. In
+      this mode, timers and event handlers will be called on a thread
+      belonging to the event_map.
   */
   class event_map
   {
   public:
     event_map()
     {
-      stop_event_type_ = SDL_RegisterEvents(2);
+      stop_event_type_ = SDL_RegisterEvents(3);
       if( stop_event_type_ != -1 )
       {
         add_timer_event_type_ = stop_event_type_ + 1;
+        stop_timer_event_type_ = stop_event_type_ + 2;
       }
     }
 
@@ -84,10 +100,14 @@ namespace sdl2
         if one_time = false f is called every timeout milliseconds, otherwise
         f is called only once
 
-        returns true if the timer was succesfully added, false otherwise
+        returns non-zero if the timer was succesfully added, zero
+        otherwise. The returned value can be used in a call to
+        stop_timer(). If more than
+        std::numeric_limits<unsigned int>::max are created, the
+        returned values may wrap and no longer be unique.
     */
     template<class Function, class... Args>
-    bool add_timer(
+    unsigned int add_timer(
       std::chrono::milliseconds interval,
       bool one_shot,
       Function&& f,
@@ -95,17 +115,46 @@ namespace sdl2
     {
       if( add_timer_event_type_ == -1 )
       {
-        return false;
+        return 0;
       }
 
       auto when = std::chrono::steady_clock::now() + interval;
+      auto id = next_timer_id_++;
       SDL_Event event;
       event.type = add_timer_event_type_;
       event.user.data1 = new timer(
+        id,
         std::move(when),
         std::move(interval),
         one_shot,
         std::bind(f, args...));
+      SDL_PushEvent(&event);
+      return id;
+    }
+
+    /** Stop a timer
+
+        Removes the specified timer so that no further calls to the
+        function associated with the timer will occur. `id` is the
+        value returned from add_timer(). This call is asynchronous, so
+        a maximum of one call to the timer function may already be in
+        flight when this call returns. If this call is made from an
+        event handler other than a timeout, it is guaranteed that no
+        further calls to the timer function will occur once this
+        call returns.
+
+        Returns true if the timer was successfully cancelled, false otherwise.
+    */
+    bool stop_timer(unsigned int id)
+    {
+      if( stop_timer_event_type_ != -1 )
+      {
+        return false;
+      }
+
+      SDL_Event event;
+      event.type = stop_timer_event_type_;
+      event.user.code = id;
       SDL_PushEvent(&event);
       return true;
     }
@@ -150,6 +199,7 @@ namespace sdl2
         }
 
         SDL_Event e;
+        SDL_ClearError(); // don't be confused by errors elsewhere
         if( SDL_WaitEventTimeout(&e, timeout) )
         {
           if( e.type == SDL_QUIT || e.type == stop_event_type_ )
@@ -161,6 +211,18 @@ namespace sdl2
             std::unique_ptr<timer> t(static_cast<timer*>(e.user.data1));
             timers_.push_back(*t);
           }
+          else if( e.type == stop_timer_event_type_ )
+          {
+            timers_.erase(
+              std::remove_if(
+                timers_.begin(),
+                timers_.end(),
+                [id = e.user.code](timer& t)
+                {
+                  return t.id_ == id;
+                }),
+              timers_.end());
+          }
           else
           {
             handle_event(e);
@@ -168,7 +230,11 @@ namespace sdl2
         }
         else
         {
-          handle_timeout();
+          auto error = SDL_GetError();
+          if( error == nullptr || error[0] == '\0' )
+          {
+            handle_timeout();
+          }
         }
 
         render_fun(args...);
@@ -208,6 +274,38 @@ namespace sdl2
                           }) != handlers_.end();
     }
 
+    /** Helper class for rate limiting events */
+    class rate_limiter
+    {
+    public:
+      /** checks whether the event should be rate limited
+
+          @returns true if the event should be discarded due to rate limiting
+                   or false otherwise
+      */
+      bool rate_limited(SDL_Event const& e)
+      {
+        if( e.key.repeat == 0 )
+        {
+          key_repeat_count_ = 0;
+        }
+        else
+        {
+          key_repeat_count_++;
+        }
+        auto last_key_timestamp = last_key_timestamp_;
+        last_key_timestamp_ = e.key.timestamp;
+
+        return (e.key.repeat != 0 &&
+                (e.key.timestamp - last_key_timestamp) <
+                (key_repeat_count_ > 0 ? 25 : 500));
+      }
+
+    private:
+      unsigned int last_key_timestamp_ = 0;
+      unsigned int key_repeat_count_ = 0;
+    };
+    
   private:
     using event_type = unsigned int;
     using handler = std::function<bool(SDL_Event const& e)>;
@@ -215,6 +313,7 @@ namespace sdl2
     struct timer
     {
       timer(
+        unsigned int id,
         time_point when,
         std::chrono::milliseconds interval,
         bool one_shot,
@@ -224,6 +323,7 @@ namespace sdl2
         , one_shot_(one_shot)
         , handler_(std::move(handler)) {}
 
+      unsigned int id_;
       time_point when_;
       std::chrono::milliseconds interval_;
       bool one_shot_;
@@ -270,7 +370,7 @@ namespace sdl2
       {
         if(e.key.keysym.sym == keycode_)
         {
-          if(!rate_limited(e))
+          if(!rate_limiter_.rate_limited(e))
           {
             handler_();
           }
@@ -281,29 +381,9 @@ namespace sdl2
       }
 
     private:
-      bool rate_limited(SDL_Event const& e)
-      {
-        if( e.key.repeat == 0 )
-        {
-          key_repeat_count_ = 0;
-        }
-        else
-        {
-          key_repeat_count_++;
-        }
-        auto last_key_timestamp = last_key_timestamp_;
-        last_key_timestamp_ = e.key.timestamp;
-
-        return (e.key.repeat != 0 &&
-                (e.key.timestamp - last_key_timestamp) <
-                (key_repeat_count_ > 0 ? 25 : 500));
-      }
-
-    private:
       SDL_Keycode keycode_;
       Callable handler_;
-      unsigned int last_key_timestamp_ = 0;
-      unsigned int key_repeat_count_ = 0;
+      rate_limiter rate_limiter_;
     };
 
     template<class Callable>
@@ -356,7 +436,9 @@ namespace sdl2
     std::vector<timer> timers_;
     event_type stop_event_type_ = -1;
     event_type add_timer_event_type_ = -1;
+    event_type stop_timer_event_type_ = -1;
     bool stop_;
+    std::atomic<unsigned int> next_timer_id_ = 1;
   };
 } // namespace sdl2
 
